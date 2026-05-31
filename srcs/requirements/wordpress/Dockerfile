@@ -1,4 +1,4 @@
-FROM alpine:3.18
+FROM alpine:3.17
 
 RUN apk add --no-cache php php-fpm php-mysqli php-json php-curl \
     php-dom php-exif php-fileinfo php-mbstring php-openssl \
