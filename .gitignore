@@ -1,0 +1,6 @@
+.env
+secrets/*
+
+.DS_Store
+.vscode/
+.github/
