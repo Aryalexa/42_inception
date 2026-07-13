@@ -360,60 +360,75 @@ C:\Windows\System32\drivers\etc\hosts
 
 
 
-## docker secrets
-En el compose:
+## Docker Secrets
+
+In the Compose file:
+
 ```yaml
-service:
-  environment:
-    DB_PS_FILE: /run/secrets/db_password    # ← read value from file (*_FILE pattern)
-  secrets:
-    - db_password # ← Select secrets to appear in the service container
+services:
+  service:
+    environment:
+      DB_PS_FILE: /run/secrets/db_password    # ← Read the value from a file (*_FILE pattern)
+    secrets:
+      - db_password                           # ← Mount this secret into the service container
+
 secrets:
-  - db_password: # ← create a secret and reference a local file => specified files will appear inside the tainer in read-only mode
-      file: ../secrets/db_password.txt 
+  db_password:                                # ← Create a secret from a local file
+    file: ../secrets/db_password.txt          #    The file will be mounted inside the container as read-only
 ```
 
-Basic flow:
-1. Create the secrets and specify where to use them:
-    - In Compose, declare the secret and reference a local file.
-    - specify in each service the secrets to mount
-    
-    secrets: db_password: file: ./secrets/db_password.txt
-    service: secrets: - db_password
+### Basic flow
 
-2. Inside the container the secret appears at /run/secrets/db_password (read-only file)
-    - Docker copia secrets/db_password.txt a /run/secrets/db_password dentro del contenedor
-    - Solo legible para ese contenedor, no en env vars de la terminal
+1. **Create the secrets and specify where to use them**
 
-3. Use the *_FILE pattern (e.g., DB_PS_FILE=/run/secrets/db_password) so apps read the file instead of env vars.
+   * In the Compose file, declare the secret and reference a local file.
+   * In each service, specify which secrets should be mounted.
 
-> Notes: secrets aren’t baked into images, are not exposed as env vars, and should not be committed to git.
+   ```yaml
+   secrets:
+     db_password:
+       file: ./secrets/db_password.txt
 
-> *_FILE pattern (DB_PS_FILE):
-> Passwords via secrets
->   - Es un patrón que usan las imágenes de MariaDB, PostgreSQL, WordPress, etc.
->   - En lugar de pasar DB_PS=mipass123 (inseguro, visible en env),
->   - Pasas DB_PS_FILE=/run/secrets/db_password (la imagen lee el archivo)
->   - La imagen lee el contenido del archivo y lo usa como password
+   services:
+     service:
+       secrets:
+         - db_password
+   ```
 
-> .env (variables no-secretas):
-> │  DOMAIN_NAME=macastro.42.fr
-> │  DB_USER=wordpress
->  → Estas SÍ se pasan como env vars normales (no son secretas) 
+2. **Inside the container, the secret appears as a read-only file at `/run/secrets/db_password`**
 
- Resumido:
-┌─────────────┬──────────────────────┬────────────────────────┬───────────────────│
-│ Tipo        │ Cómo                 │ Seguridad              │ Uso               │
-├─────────────┼──────────────────────┼────────────────────────┼───────────────────│
-│ Secrets     │ /run/secrets/        │ ✅ Alta (no en env)    │ Passwords, keys   │
-│             │ (archivo)            │                        │                   │
-├─────────────┼──────────────────────┼────────────────────────┼───────────────────│
-│ Env vars    │ ENV_VAR=valor        │ ❌ Baja (visible en    │ Domain, usernames │
-│             │                      │ env)                   │                   │
-├─────────────┼──────────────────────┼────────────────────────┼───────────────────│
-│ _FILE       │ Patrón que lee       │ ✅ Alta                │ Passwords vía     │
-│             │ archivo              │                        │ secrets           │
-└─────────────┴──────────────────────┴────────────────────────┴───────────────────│
+   * Docker copies `secrets/db_password.txt` to `/run/secrets/db_password` inside the container.
+   * The file is only accessible from that container and is **not** exposed as an environment variable.
+
+3. **Use the `*_FILE` pattern** (for example, `DB_PS_FILE=/run/secrets/db_password`) so the application reads the secret from the file instead of from an environment variable.
+
+> **Notes:** Secrets are not baked into the image, are not exposed as environment variables, and should never be committed to Git.
+
+### `*_FILE` pattern (e.g., `DB_PS_FILE`)
+
+**Using passwords with secrets**
+
+* This is a pattern supported by official images such as MariaDB, PostgreSQL, WordPress, and others.
+* Instead of passing `DB_PS=myPassword123` (which is insecure because it's visible as an environment variable),
+* You pass `DB_PS_FILE=/run/secrets/db_password`.
+* The image reads the file's contents and uses that value as the password.
+
+### `.env` (non-secret variables)
+
+```text
+DOMAIN_NAME=macastro.42.fr
+DB_USER=wordpress
+```
+
+These values are passed as regular environment variables because they are **not** considered sensitive.
+
+### Summary
+
+| Type                      | How it's provided           | Security                           | Typical use                                          |
+| ------------------------- | ------------------------- | ------------------------- | ------------------------- |
+| **Secrets**               | `/run/secrets/` (file)      | ✅ High (not in env)     | Passwords, keys, certificates                    |
+| **Env vars**              | `ENV_VAR=value`             | ❌ Low (visible in the env) | Domain names, usernames, configuration               |
+| **`*_FILE` pattern**      | Reads the value from a file | ✅ High                 | Passwords via secrets |
 
 
 
