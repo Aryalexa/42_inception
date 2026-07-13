@@ -35,7 +35,7 @@ Your containers have to restart in case of a crash.
 
 > [!info] A Docker container is not a virtual machine. Thus, it is not recommended to use any hacky patches based on ’tail -f’ and similar methods when trying to run it. Read about how daemons work and whether it’s a good idea to use them or not.
 
-> [!warn] Of course, using network: `host` or `--link` or `links:` is forbidden. The network line must be present in your docker-compose.yml file. Your containers must not be started with a command running an infinite loop. Thus, this also applies to any command used as entrypoint, or used in entrypoint scripts. The following are a few prohibited hacky patches: tail -f, bash, sleep infinity, while true.
+> [!warning] Of course, using network: `host` or `--link` or `links:` is forbidden. The network line must be present in your docker-compose.yml file. Your containers must not be started with a command running an infinite loop. Thus, this also applies to any command used as entrypoint, or used in entrypoint scripts. The following are a few prohibited hacky patches: tail -f, bash, sleep infinity, while true.
 
 > [!info] Read about PID 1 and the best practices for writing Dockerfiles.
 
@@ -46,9 +46,8 @@ Your containers have to restart in case of a crash.
 To make things simpler, you have to configure your domain name so it points to your local IP address.
 This domain name must be login.42.fr. Again, you have to use your own login. For example, if your login is wil, wil.42.fr will redirect to the IP address pointing to wil’s website.
 
-> [!warn] 
-> The latest tag is prohibited.
-> No password must be present in your Dockerfiles. It is mandatory to use environment variables. 
+> [!warning] 
+> The latest tag is prohibited. No password must be present in your Dockerfiles. It is mandatory to use environment variables. 
 > Also, it is mandatory to use a .env file to store environment variables. It is strongly recommended that you use Docker secrets to store any confidential information. Any credentials, API keys, or passwords found in your Git repository (outside of properly configured secrets) will result in project failure.
 > Your NGINX container must be the only entrypoint into your infrastructure via the port 443 only, using the TLSv1.2 or TLSv1.3 protocol.
 
@@ -139,7 +138,8 @@ MYSQL_USER=XXXXXXXXXXXX
 $>
 ```
 
-> [!warn] For obvious security reasons, any credentials, API keys, passwords, etc., must be saved locally in various ways/files and ignored by git.
+> [!warning]
+> For obvious security reasons, any credentials, API keys, passwords, etc., must be saved locally in various ways/files and ignored by git.
 > Publicly stored credentials will lead you directly to a failure of the project.
 
 > [!info] You can store your variables (as a domain name) in an environment variable file like .env
@@ -157,11 +157,13 @@ The README.md must include at least:
 Additional sections may be required depending on the project (e.g., usage examples, feature list, technical choices, etc.).
 
 Any required additions will be explicitly listed below.
-- A Project description section must also explain the use of Docker and the sources included in the project. It must indicate the main design choices, as well as a comparison between:
+- A **Project description** section must also explain the use of Docker and the sources included in the project. It must indicate the main design choices, as well as a comparison between:
     - Virtual Machines vs Docker
     - Secrets vs Environment Variables
     - Docker Network vs Host Network
     - Docker Volumes vs Bind Mounts
+
+
 ## Prerequisites for validation
 
 In addition to the existing requirements, the following documentation files must be present at the root of your repository. They must be written in Markdown format (.md).
@@ -172,6 +174,7 @@ In addition to the existing requirements, the following documentation files must
    - Access the website and the administration panel.
    - Locate and manage credentials.
    - Check that the services are running correctly.
+
 * `DEV_DOC.md` — Developer documentation This file must describe how a developer can:
    - Set up the environment from scratch (prerequisites, configuration files, secrets).
    - Build and launch the project using the Makefile and Docker Compose.
@@ -179,14 +182,19 @@ In addition to the existing requirements, the following documentation files must
    - Identify where the project data is stored and how it persists.
 
 ## Bonus
-For this project, the bonus part is intended to be simple. A Dockerfile must be written for each additional service. Thus, each service will run inside its own container and will have, if necessary, its dedicated volume.
+For this project, the bonus part is intended to be simple.
+
+A Dockerfile must be written for each additional service. Thus, each service will run inside its own container and will have, if necessary, its dedicated volume.
 
 Bonus list:
-- Set up redis cache for your WordPress website in order to properly manage the cache.
-- Set up a FTP server container pointing to the volume of your WordPress website.
+- Set up **redis cache** for your WordPress website in order to properly manage the cache.
+- Set up a **FTP server** container pointing to the volume of your WordPress website.
 - Create a simple static website in the language of your choice except PHP (yes, PHP is excluded). For example, a showcase site or a site for presenting your resume.
-- Set up Adminer.
+- Set up **Adminer**.
 - Set up a service of your choice that you think is useful. During the defense, you will have to justify your choice.
 
-To complete the bonus part, you have the possibility to set up extra services. In this case, you may open more ports to suit your needs.
-The bonus part will only be assessed if the mandatory part is completed perfectly. Perfect means the mandatory part has been fully completed and functions without any malfunctions. If you have not passed ALL the mandatory requirements, your bonus part will not be evaluated at all.
+> [!info] To complete the bonus part, you have the possibility to set up extra services. In this case, you may open more ports to suit your needs.
+
+
+> [!warning] The bonus part will only be assessed if the mandatory part is completed perfectly. Perfect means the mandatory part has been fully completed and functions without any malfunctions. If you have not passed ALL the mandatory requirements, your bonus part will not be evaluated at all.
+
