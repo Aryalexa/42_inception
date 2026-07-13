@@ -1,6 +1,6 @@
-mode: casa
+mode: local
 
-casa
+local
 =====
 MacOS.
 no hace falta VM. pero con cuidado de no estropear mi ordenador personal
@@ -9,7 +9,7 @@ el objetivo es crear los archivos de configs y demás necesario para guardar en 
 Host Addresses start with /Users/user
 
 
-escuela
+school
 =======
 Debian.
 sí hace falta VM. por lo que hay que montar la imagen y configurar la salida a internet.

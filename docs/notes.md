@@ -1,16 +1,431 @@
+# Research notes
+
+## Containers vs VM
+| Containers                                       | Virtual Machines (VMs)                              |
+| ------------------------------------------------ | --------------------------------------------------- |
+| Share the host OS kernel                         | Each VM has its own guest OS                        |
+| Lightweight (MBs)                                | Heavier (GBs)                                       |
+| Start in seconds or less                         | Start in minutes (typically)                        |
+| Lower resource usage                             | Higher CPU, RAM, and disk usage                     |
+| Best for microservices, CI/CD, cloud-native apps | Best for running different OSes or strong isolation |
+| Isolation at the process level                   | Isolation at the hardware/hypervisor level          |
+| Examples: Docker, Podman                         | Examples: VMware, VirtualBox, Hyper-V, KVM          |
+
+Rule of thumb
+* **Use containers** when you want **fast deployment, portability, and efficient resource usage**.
+* **Use VMs** when you need **different operating systems, stronger isolation, or full machine virtualization**.
+
+Simple analogy
+* **Container** = Apartment in a building (shares the building infrastructure).
+* **VM** = Separate house (has its own infrastructure, but costs more to maintain).
+
+## Docker named volumes VS bind mounts
+
+> Bind mounts are for: Development, sharing source code
+> ``- host-addr:cont-addr``
+> Named volumes are for: Databases, persistent app data
+> ``- vol-name:cont-addr``
+
+### Named Volumes
+A named volume is managed by Docker. You give it a name, and Docker stores it in its own storage directory.
+
+```yaml
+services:
+    service:
+        volumes:
+            - postgres-data:/var/lib/postgresql/data
+volumes:
+  postgres-data:
+```
+Pros
+- Docker manages everything. Docker chooses location.
+- Safer. You can't accidentally delete data by modifying a host folder.
+- Better portability between environments.
+
+Cons
+- Harder to inspect files directly.
+- Files aren't stored in an obvious location.
+
+### Bind mounts
+A bind mount maps an existing folder from your computer into the container. Editing a file on your computer immediately changes it inside the container.
+
+```yaml
+services:
+    service:
+        volumes:
+            - ./src:/app
+```
+
+Pros
+- Great for development. Live code changes.
+- Easy to inspect files.
+- Works well with editors and Git.
+
+Cons
+- Container depends on the host directory existing.
+- Less portable.
+- File permission issues are more common.
+- Unsafe. Can accidentally overwrite files inside the container.
+
+## PID 1
+
+* **PID 1** is the main process inside a container.
+* Docker runs the command specified by `CMD` (or `ENTRYPOINT`) as the container's main process.
+* PID 1 is responsible for:
+  * Receiving termination signals (`SIGTERM`, `SIGINT`).
+  * Reaping zombie child processes.
+* Use the **exec form** of `CMD` so your application becomes PID 1.
+
+**Good**
+```dockerfile
+CMD ["node", "server.js"]
+```
+
+**Avoid**
+```dockerfile
+CMD node server.js
+```
+
+Reason: the shell form runs `/bin/sh -c`, making the shell PID 1 instead of your application, which can interfere with signal handling. 
+Imagine Docker wants to stop your container and sends SIGTERM. The shell receives the signal first. It may not forward it to your app, so it never gets the chance to shut down gracefully.
+
+
+**Why does PID 1 have special behavior?** 
+
+On Linux, PID 1 is the init process. It has responsibilities that ordinary processes don't:
+- it receives signals intended for the container
+- it should clean up ("reap") exited child processes to avoid zombie processes
+
+When your application is PID 1, it inherits those responsibilities.
+
+
+## Dockerfile CMD
+
+* `CMD` specifies the **default command** to run when a container starts.
+* It can be overridden at runtime:
+```bash
+docker run my-image python other.py
+```
+* Prefer the **exec form** (`CMD ["cmd", "arg1"]`) over the shell form (`CMD cmd arg1`).
+  - exec form: Docker starts the command directly. And it PID 1.
+  - shell form: Docker actually runs ``/bin/sh -c "cmd arg1"```. Now the shell is PID 1, not your app.
+
+
+> Always use the exec form of `CMD` (`CMD ["app"]`) so your application runs as PID 1, receives signals correctly, and can shut down gracefully.
+
+
+## Dockerfile ENTRYPOINT
+
+> `ENTRYPOINT` defines the **main executable** of the container. Unlike `CMD`, it is **not easily replaced** when running the container.
+
+`ENTRYPOINT` Defines the executable that always runs.
+
+```dockerfile
+ENTRYPOINT ["python"]
+CMD ["app.py"]
+```
+
+Running:
+```bash
+docker run my-image
+```
+executes ``python app.py``
+
+Running:
+```bash
+docker run my-image other.py
+```
+executes ``python other.py``
+
+
+The `CMD` is replaced, but `ENTRYPOINT` (`python`) stays.
+
+Rule of thumb
+* **`CMD`** → default command or default arguments (easy to override).
+* **`ENTRYPOINT`** → fixed executable that the container is built to run. Often combined with `CMD` for default arguments.
+
+### entrypoint script
+An **entrypoint script** is a shell script that is executed as the container's `ENTRYPOINT` before starting the main application.
+
+```dockerfile
+COPY docker-entrypoint.sh /
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["node", "server.js"]
+```
+
+`docker-entrypoint.sh`:
+
+```sh
+#!/bin/sh
+set -e
+
+# Initialization
+echo "Waiting for database..."
+
+# Run migrations
+npm run migrate
+
+# Start the main application
+exec "$@"
+```
+
+#### Why use an entrypoint script?
+
+To perform startup tasks such as:
+
+* Waiting for a database or another service.
+* Running database migrations.
+* Creating configuration files from environment variables.
+* Initializing directories or permissions.
+
+#### Why `exec "$@"`?
+
+The last line should almost always be `exec "$@"`.
+
+Here `$@` = all the arguments passed to the script. So `$@` expands to: `node server.js`. `exec` replaces the shell with that command. Without `exec`, PID 1 is the shell executing the entrypoint script.
+
+**Takeaway:** An entrypoint script is for **initialization before your app starts**, and it should end with `exec "$@"` so the main application runs as PID 1.
+
+
+## Best Dockerfile Best Practices
+
+> A good Dockerfile should produce an image that is:
+> * ✅ Small
+> * ✅ Secure
+> * ✅ Reproducible
+> * ✅ Cache-friendly (fast builds)
+> * ✅ Runs the application as **PID 1**
+> * ✅ Easy to configure without rebuilding
+> * ✅ Contains only what's needed to run the application
+
+
+### 1. Use a minimal base image
+
+Smaller images are faster and have fewer vulnerabilities.
+
+```dockerfile
+FROM node:22-alpine
+```
+
+---
+
+### 2. Pin image versions
+
+Avoid `latest` to ensure reproducible builds.
+
+```dockerfile
+FROM node:22.15-alpine
+```
+
+---
+
+### 3. Leverage Docker layer caching
+
+Copy dependency files first, then install dependencies.
+
+```dockerfile
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+```
+
+---
+
+### 4. Use a `.dockerignore`
+
+Exclude files like:
+
+```text
+node_modules
+.git
+.env
+coverage
+```
+
+This reduces build time and image size.
+
+---
+
+### 5. Use multi-stage builds
+
+Keep build tools out of the final image.
+
+```dockerfile
+FROM node AS builder
+# build
+
+FROM nginx
+COPY --from=builder ...
+```
+
+---
+
+### 6. Run as a non-root user
+
+Improves container security.
+
+```dockerfile
+USER app
+```
+
+---
+
+### 7. Use the exec form
+
+Prefer:
+
+```dockerfile
+CMD ["node", "server.js"]
+ENTRYPOINT ["python"]
+```
+
+Avoid:
+
+```dockerfile
+CMD node server.js
+```
+
+This ensures your application becomes **PID 1**.
+
+---
+
+### 8. Use an entrypoint script only when needed
+
+Use it for initialization (e.g., migrations, config generation, waiting for dependencies), and finish with:
+
+```sh
+exec "$@"
+```
+
+---
+
+### 9. Reduce image layers
+
+Combine related `RUN` commands and clean up caches.
+
+```dockerfile
+RUN apt-get update && \
+    apt-get install -y curl && \
+    rm -rf /var/lib/apt/lists/*
+```
+
+---
+
+### 10. Keep images immutable
+
+* Don't store data inside the image.
+* Inject configuration with **environment variables**.
+* Persist data using **volumes**.
+
+## DNS (Domain Name System) and the hosts file
+This is about **DNS (Domain Name System)** and the **hosts file**.
+
+**How a domain name is resolved**
+
+Normally, when you visit a web `google.com`..
+- your computer asks a **DNS** server for the correspondent IP address.
+- The DNS server replies: `142.250.x.x`.
+- Then your browser connects to that IP.
+
+**But before...**
+
+Before asking a DNS server, your operating system checks a local file called **hosts**.
+
+The hosts file is simply a manual mapping: `IP_ADDRESS` and `DOMAIN_NAME`.
+
+Example:
+```text
+127.0.0.1 localhost
+```
+This means: Whenever I type `localhost`, connect to `127.0.0.1`.
+
+
+**Where is the hosts file?** Editing it usually requires administrator/root privileges.
+
+* Linux/macOS
+```
+/etc/hosts
+```
+* Windows
+```
+C:\Windows\System32\drivers\etc\hosts
+```
+
+> Making a domain point to our local IP address lets you test features that depend on the **Host** header, virtual hosts, HTTPS certificates, or domain-based routing, even though the site is running locally.
+
+> the hosts file is simply a **local, manual DNS override**.
+
+
+
+
+
+## docker secrets
+En el compose:
+```yaml
+service:
+  environment:
+    DB_PS_FILE: /run/secrets/db_password    # ← read value from file (*_FILE pattern)
+  secrets:
+    - db_password # ← Select secrets to appear in the service container
+secrets:
+  - db_password: # ← create a secret and reference a local file => specified files will appear inside the tainer in read-only mode
+      file: ../secrets/db_password.txt 
+```
+
+Basic flow:
+1. Create the secrets and specify where to use them:
+    - In Compose, declare the secret and reference a local file.
+    - specify in each service the secrets to mount
+    
+    secrets: db_password: file: ./secrets/db_password.txt
+    service: secrets: - db_password
+
+2. Inside the container the secret appears at /run/secrets/db_password (read-only file)
+    - Docker copia secrets/db_password.txt a /run/secrets/db_password dentro del contenedor
+    - Solo legible para ese contenedor, no en env vars de la terminal
+
+3. Use the *_FILE pattern (e.g., DB_PS_FILE=/run/secrets/db_password) so apps read the file instead of env vars.
+
+> Notes: secrets aren’t baked into images, are not exposed as env vars, and should not be committed to git.
+
+> *_FILE pattern (DB_PS_FILE):
+> Passwords via secrets
+>   - Es un patrón que usan las imágenes de MariaDB, PostgreSQL, WordPress, etc.
+>   - En lugar de pasar DB_PS=mipass123 (inseguro, visible en env),
+>   - Pasas DB_PS_FILE=/run/secrets/db_password (la imagen lee el archivo)
+>   - La imagen lee el contenido del archivo y lo usa como password
+
+> .env (variables no-secretas):
+> │  DOMAIN_NAME=macastro.42.fr
+> │  DB_USER=wordpress
+>  → Estas SÍ se pasan como env vars normales (no son secretas) 
+
+ Resumido:
+┌─────────────┬──────────────────────┬────────────────────────┬───────────────────│
+│ Tipo        │ Cómo                 │ Seguridad              │ Uso               │
+├─────────────┼──────────────────────┼────────────────────────┼───────────────────│
+│ Secrets     │ /run/secrets/        │ ✅ Alta (no en env)    │ Passwords, keys   │
+│             │ (archivo)            │                        │                   │
+├─────────────┼──────────────────────┼────────────────────────┼───────────────────│
+│ Env vars    │ ENV_VAR=valor        │ ❌ Baja (visible en    │ Domain, usernames │
+│             │                      │ env)                   │                   │
+├─────────────┼──────────────────────┼────────────────────────┼───────────────────│
+│ _FILE       │ Patrón que lee       │ ✅ Alta                │ Passwords vía     │
+│             │ archivo              │                        │ secrets           │
+└─────────────┴──────────────────────┴────────────────────────┴───────────────────│
+
+
+
+
+
 ## general
 
 1. NGINX - reverse proxy, handles HTTPS/TLS, routes requests to PHP-FPM
-  2. WordPress - PHP application running in php-fpm, handles business logic
-  3. MariaDB - database
+2. WordPress - PHP application running in php-fpm, handles business logic
+3. MariaDB - database
 
-  The flow is: Client -> NGINX (443) -> WordPress (php-fpm on 9000) -> MariaDB (3306)
-
-  I should explain this clearly and concisely.
-
-● How These Services Work
-
-  The flow:
+The flow is:
 
    Client (https://mayrcast.42.fr:443)
        ↓
@@ -19,6 +434,8 @@
    WordPress container (php-fpm daemon on port 9000)
        ↓
    MariaDB container (database on port 3306)
+
+● How These Services Work
 
 **NGINX Container**
  - **Role**: Reverse proxy + TLS terminator
@@ -60,14 +477,13 @@ All three containers connect via a Docker bridge network (inception). They talk 
  - Client talks to NGINX at https://mayrcast.42.fr:443
 
 
-## concepts and QnAs
 
-### `expose`expose* in Docker Compose
+
+## `expose` in Docker Compose
 - expose makes the port available to other containers on the same Docker network, but not to the host.
 
------
 
-### why NGINX needs to mount the WordPress volume
+## why NGINX needs to mount the WordPress volume
 Technically, NGINX could proxy ALL requests to WordPress (including static files), and let WordPress serve them. But that would be inefficient:
 
  Current setup:
@@ -93,79 +509,11 @@ If you removed the volume from NGINX:
 However, in a production setup, you might actually store static assets in object storage (S3, etc.) separate from the volume, and NGINX would proxy those. But for this project, sharing the volume is the right call.
 
 
-------
 
-### Alpine vs Debian
 
-From bases.md: "penultimate stable version of Alpine or Debian" — your choice.
 
-Alpine (chosen here):
 
- - ✅ Tiny (~5MB base vs ~100MB for Debian)
- - ✅ Faster build/push/pull
- - ✅ Smaller attack surface
- - ✅ Docker standard (most images use Alpine)
- - ❌ Uses musl libc instead of glibc (can cause compatibility issues with some apps)
- - ❌ Fewer packages, fewer docs
-
-Debian:
-
- - ✅ More packages, better compatibility
- - ✅ glibc (standard C library)
- - ❌ Much larger, slower
- - ❌ More bloat for a container
-
-For this project: Alpine is fine, but if MariaDB has issues, switching to Debian is easy. Let's test MariaDB first and see.
-
-### docker secrets
-Déjame desglosarlo:
-│  mariadb:
-│    environment:
-│      MYSQL_PASSWORD_FILE: /run/secrets/db_password    # ← Dónde buscar el password
-│    secrets:
-│      - db_password                                     # ← Qué archivo montar como secret
-
-El flujo:
-1. Docker Secrets (secrets: en compose):
-│  secrets:
-│    - db_password:
-│        file: ../secrets/db_password.txt 
-   → Docker copia secrets/db_password.txt a /run/secrets/db_password dentro del contenedor
-   → Solo legible para ese contenedor, no en env vars de la terminal
-2. *_FILE pattern (MYSQL_PASSWORD_FILE):
-    - Es un patrón que usan las imágenes de MariaDB, PostgreSQL, WordPress, etc.
-    - En lugar de pasar MYSQL_PASSWORD=mipass123 (inseguro, visible en env),
-    - Pasas MYSQL_PASSWORD_FILE=/run/secrets/db_password (la imagen lee el archivo)
-    - La imagen lee el contenido del archivo y lo usa como password
-3. .env (variables no-secretas):
-│  DOMAIN_NAME=mayrcast.42.fr
-│  MYSQL_USER=wordpress
-   → Estas SÍ se pasan como env vars normales (no son secretas) 
-
- Resumido:
-┌─────────────┬──────────────────────┬────────────────────────┬───────────────────│
-│ Tipo        │ Cómo                 │ Seguridad              │ Uso               │
-├─────────────┼──────────────────────┼────────────────────────┼───────────────────│
-│ Secrets     │ /run/secrets/        │ ✅ Alta (no en env)    │ Passwords, keys   │
-│             │ (archivo)            │                        │                   │
-├─────────────┼──────────────────────┼────────────────────────┼───────────────────│
-│ Env vars    │ ENV_VAR=valor        │ ❌ Baja (visible en    │ Domain, usernames │
-│             │                      │ env)                   │                   │
-├─────────────┼──────────────────────┼────────────────────────┼───────────────────│
-│ _FILE       │ Patrón que lee       │ ✅ Alta                │ Passwords vía     │
-│             │ archivo              │                        │ secrets           │
-└─────────────┴──────────────────────┴────────────────────────┴───────────────────│
-
- ¿Necesitas tanto *_FILE como secrets:?
-- secrets: = monta el archivo en el contenedor
-- MYSQL_PASSWORD_FILE = le dice a MariaDB "lee aquí el password" 
-
-Sin secrets:, el archivo no existe en el contenedor.
-Sin MYSQL_PASSWORD_FILE, MariaDB buscaría MYSQL_PASSWORD (env var insegura).
-
-## make it work
-
-### mariadb
+## mariadb
 Test MariaDB Alone
 ```sh
  # Create the data directory (required by docker-compose)
